@@ -37,13 +37,23 @@ typedef struct TCB {
 /* mutex struct definition */
 typedef struct worker_mutex_t {
 	/* add something here */
-	enum{LOCKED, UNLOCKED} state;
+	//_Atomic {LOCKED, UNLOCKED} state;
 	int ownerId;
 	// YOUR CODE HERE
 } worker_mutex_t;
 
 /* define your data structures here: */
 // Feel free to add your own auxiliary data structures (linked list or queue etc...)
+
+//create linked list runqueue 
+typedef struct node{
+	worker_t *data;
+	struct node *next;
+};
+
+void enqueue(worker_t *thread);
+
+void dequeue(worker_t *thread);
 
 // YOUR CODE HERE
 

@@ -14,8 +14,16 @@ double avg_turn_time=0;
 double avg_resp_time=0;
 
 
+
 // INITAILIZE ALL YOUR OTHER VARIABLES HERE
 // YOUR CODE HERE
+//RUNQUEUE
+static ucontext_t uctx_sched;
+//NEED TO ADD BENCHMARK CONTEXt
+static void* sched_stack_pointer;
+static accessedFirstTime = 0;
+struct node *head;
+struct node *current;
 
 
 /* create a new thread */
@@ -29,15 +37,38 @@ int worker_create(worker_t * thread, pthread_attr_t * attr,
        // - make it ready for the execution.
 
        // YOUR CODE HERE
-	   struct TCB *threadd = malloc(sizeof(struct TCB)); //allocated TCB space
+	   struct TCB *threadd = (struct TCB*)malloc(sizeof(struct TCB)); //allocated TCB space
 
 	   threadd->threadId = &thread;
-	   makecontext(&threadd->context,function, 1, arg); //makes context
+
+	   threadd->stack_pointer = (void *)malloc(STACK_SIZE); //allocates stack space
+
 	   threadd->context.uc_link = NULL;
-	   threadd->stack_pointer = malloc(STACK_SIZE); //allocates stack space
 	   threadd->context.uc_stack.ss_sp = threadd->stack_pointer; //sets context stack
 	   threadd->context.uc_stack.ss_size = STACK_SIZE;
 	   threadd->context.uc_stack.ss_flags=0;
+
+	   makecontext(&threadd->context,function, 1, arg); //makes context
+
+	   if(accessedFirstTime == 0){//makes scheduler context if it has not been created yet by testing if this is first time calling create func
+		sched_stack_pointer = malloc(STACK_SIZE);
+		//allocates all neccessary parts of context
+		uctx_sched.uc_link = NULL;
+		uctx_sched.uc_stack.ss_sp = sched_stack_pointer;
+		uctx_sched.uc_stack.ss_size = STACK_SIZE;
+		uctx_sched.uc_stack.ss_flags = 0;
+
+		//makes context NEED TO CHANGE THE FUNCTION
+		makecontext(&uctx_sched,schedule_psjf(),0);
+		//adjusts variable to 1 to show that worker create has been accessed.
+		accessedFirstTime = 1;
+		//IF ACCESSED FIRST TIME MAKE THREAD HEAD OF RUNQUEUE
+		head = (struct node*)malloc(sizeof(struct node));
+		head->data = thread;
+		current = head;
+	   }else{
+		enqueue(thread);
+	   }
 
 	   threadd->state = READY; //sets thread state
 
@@ -171,3 +202,16 @@ void print_app_stats(void) {
 
 // YOUR CODE HERE
 
+//FUNCTION TO ENQUEUE TO RUNQUEUE
+void enqueue(worker_t *thread){
+	struct node *t = (struct node*)malloc(sizeof(struct node));
+	t->data = thread;
+	current->next = t;
+	current = t;
+}
+
+//METHOD TO DEQUEUE FROM RUNQUEUE
+void dequeue(worker_t *thread){
+	
+
+}
