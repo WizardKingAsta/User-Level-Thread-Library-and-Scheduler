@@ -2,12 +2,16 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "C/C++ Runner: Debug Session",
-      "type": "lldb",
+      "name": "Debug test.c",
+      "type": "cppdbg",
       "request": "launch",
+      "program": "${workspaceFolder}/benchmarks/test",
       "args": [],
-      "cwd": "/Users/emperormaanav/Documents/OSProjects/User-Level-Thread-Library-and-Scheduler",
-      "program": "/Users/emperormaanav/Documents/OSProjects/User-Level-Thread-Library-and-Scheduler/build/Debug/outDebug"
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "build",
+      "MIMode": "gdb",
     }
+  
   ]
 }
