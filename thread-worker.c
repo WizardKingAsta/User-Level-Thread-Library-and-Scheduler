@@ -18,8 +18,8 @@ double avg_resp_time=0;
 // INITAILIZE ALL YOUR OTHER VARIABLES HERE
 // YOUR CODE HERE
 //RUNQUEUE
-struct node *runqueue_head;
-struct node *current_thread;
+struct node *head;
+struct node *current;
 
 //global contexts to swtich between
 static void* sched_stack_pointer;
@@ -30,6 +30,7 @@ ucontext_t main_context;
 //other global declarations
 static int accessedFirstTime = 0;
 ucontext_t curr;
+struct TCB *current_thread;
 static void schedule();
 
 //global timer for interupt (just basic ten seconds for FCFS rn)
@@ -43,19 +44,19 @@ struct itimerval timer;
 
 
 void setUpTimer(){
-	sa.sa_handler = &timer_handler;
-	sa.sa_flags = SA_RESTART;  // Restart functions if interrupted by handler
-	sigaction(SIGPROF, &sa, NULL);
+sa.sa_handler = &timer_handler;
+sa.sa_flags = SA_RESTART;  // Restart functions if interrupted by handler
+sigaction(SIGPROF, &sa, NULL);
 
-	// Initial expiration
-	timer.it_value.tv_sec = 1;
-	timer.it_value.tv_usec = 0;
+// Initial expiration
+timer.it_value.tv_sec = 1;
+timer.it_value.tv_usec = 0;
 
-	// Periodic interval
-	timer.it_interval.tv_sec = 1;
-	timer.it_interval.tv_usec = 0;
+// Periodic interval
+timer.it_interval.tv_sec = 1;
+timer.it_interval.tv_usec = 0;
 
-	// Start the timer
+// Start the timer
 }
 
 void* thread_wrapper(void *arg) {
@@ -63,6 +64,8 @@ void* thread_wrapper(void *arg) {
     void *ret = wrapper_arg->function(wrapper_arg->arg); // Call the original function
 	wrapper_arg->thread->state = TERMINATED;
 	swapcontext(&curr,&scheduler_context);
+    free(wrapper_arg->thread->stack_pointer);
+    free(wrapper_arg->thread);
     free(wrapper_arg); // Clean up dynamically allocated memory for the argument
     return ret;
 }
@@ -109,10 +112,10 @@ int worker_create(worker_t * thread, pthread_attr_t * attr,
 		}
 		getcontext(&main_context);
 		setitimer(ITIMER_PROF, &timer, NULL);
-		if(threadd->state != TERMINATED){
+		if(threadd->state != TERMINATED && threadd->state != BLOCKED){
 
 	   threadd->threadId = thread;
-
+	   threadd->state = NEW;
 	   threadd->stack_pointer = (void *)malloc(STACK_SIZE); //allocates stack space
 		if (threadd->stack_pointer == NULL){
 		perror("Failed to allocate stack");
@@ -144,7 +147,7 @@ int worker_create(worker_t * thread, pthread_attr_t * attr,
 	   threadd->state = READY; //sets thread state
 
 	   //must add to run queue
-	   enqueue(&runqueue_head, threadd);
+	   enqueue(threadd);
 	   getcontext(&curr);
 	   swapcontext(&curr,&scheduler_context);
 		}
@@ -156,9 +159,12 @@ int worker_create(worker_t * thread, pthread_attr_t * attr,
 int worker_yield() {
 	
 	// - change worker thread's state from Running to Ready
+	current_thread->state =  BLOCKED;
 	// - save context of this thread to its thread control block
+	getcontext(&current_thread->context);
 	// - switch from thread context to scheduler context
-
+	enqueue(current_thread);
+	swapcontext(&curr,&scheduler_context);
 	// YOUR CODE HERE
 	
 	return 0;
@@ -167,7 +173,11 @@ int worker_yield() {
 /* terminate a thread */
 void worker_exit(void *value_ptr) {
 	// - de-allocate any dynamic memory created when starting this thread
+	free(current_thread->stack_pointer);
+	free(current_thread);
+	current_thread = NULL;
 	free(value_ptr);
+	swapcontext(&scheduler_context, &main_context);
 	// YOUR CODE HERE
 };
 
@@ -176,6 +186,17 @@ void worker_exit(void *value_ptr) {
 int worker_join(worker_t thread, void **value_ptr) {
 	
 	// - wait for a specific thread to terminate
+	struct node* temp = head;
+	while(temp->next != NULL){
+		if(*(temp->data->threadId) == thread){
+			break;
+		}
+	}
+	while (temp->data->state != TERMINATED) {
+        worker_yield(); // Yield processor so other threads can run while we wait
+    }
+	free(temp->data->stack_pointer);
+    free(temp->data);
 	// - de-allocate any dynamic memory created by the joining thread
 	
 	// YOUR CODE HERE
@@ -183,118 +204,63 @@ int worker_join(worker_t thread, void **value_ptr) {
 };
 
 /* initialize the mutex lock */
-int worker_mutex_init(worker_mutex_t *mutex, const pthread_mutexattr_t *mutexattr)
-{
+int worker_mutex_init(worker_mutex_t *mutex, 
+                          const pthread_mutexattr_t *mutexattr) {
 	//- initialize data structures for this mutex
 
 	// YOUR CODE HERE
-
-	// Initialize the mutex as unlocked
-	// 0 unlocked, 1 locked
-    mutex->isLocked = 0; 
-
-    // Initialize the blocked threads queue
-    mutex->blocked_threads = NULL;
-
 	return 0;
 };
 
 /* aquire the mutex lock */
-int worker_mutex_lock(worker_mutex_t *mutex)
-{
+int worker_mutex_lock(worker_mutex_t *mutex) {
+
         // - use the built-in test-and-set atomic function to test the mutex
         // - if the mutex is acquired successfully, enter the critical section
         // - if acquiring mutex fails, push current thread into block list and
         // context switch to the scheduler thread
 
         // YOUR CODE HERE
-
-		// If the mutex is locked
-		while (__sync_lock_test_and_set(&mutex->isLocked, 1))
-		{
-			// Get the current thread
-			tcb *currentThread = current_thread->data;
-
-			// Set its state to BLOCKED
-			currentThread->state = BLOCKED;
-
-			// Add the current thread to the blocked threads list of the mutex
-			enqueue(&mutex, currentThread);
-
-			// Yield the CPU to the scheduler
-			worker_yield();
-		}
-		return 0;
+        return 0;
 };
 
 /* release the mutex lock */
-int worker_mutex_unlock(worker_mutex_t *mutex)
-{
+int worker_mutex_unlock(worker_mutex_t *mutex) {
 	// - release mutex and make it available again. 
 	// - put threads in block list to run queue 
 	// so that they could compete for mutex later.
 
 	// YOUR CODE HERE
-
-    // Release the mutex
-    __sync_lock_release(&mutex->isLocked);
-
-    // If there are threads waiting for the mutex
-    if (mutex->blocked_threads)
-	{
-        // Move one thread from the blocked list to the run queue
-        struct node *temp = dequeue(&mutex->blocked_threads);
-		struct TCB *nextThread = temp->data;
-        nextThread->state = READY;
-        enqueue(&runqueue_head, nextThread); 
-    }
-    return 0;
+	return 0;
 };
 
 
 /* destroy the mutex */
-int worker_mutex_destroy(worker_mutex_t *mutex)
-{
+int worker_mutex_destroy(worker_mutex_t *mutex) {
 	// - de-allocate dynamic memory created in worker_mutex_init
-
-	// Check if the mutex is locked
-    if (mutex->isLocked)
-	{
-        perror("Attempt to destroy a locked mutex");
-        return -1;
-    }
-
-    // If there are threads waiting for the mutex
-    while (mutex->blocked_threads)
-	{
-        // Move threads from the blocked queue to the run queue
-		struct node *temp = dequeue(&mutex->blocked_threads);
-        struct TCB *nextThread = temp->data;
-        enqueue(&runqueue_head, nextThread); 
-    }
-
-    // Deallocate the blocked threads queue
-    struct node *current = mutex->blocked_threads;
-	struct node *next_node;
-	while (current != NULL)
-	{
-		next_node = current->next;
-		free(current);
-		current = next_node;
-	}
-	mutex->blocked_threads = NULL;
 
 	return 0;
 };
 
 /* scheduler */
 static void schedule() {
-	if(runqueue_head == NULL){
+	if(head == NULL){
 		setcontext(&main_context);
 	}else{
-		struct node *temp = dequeue(&runqueue_head);
-		current_thread = temp; // when swapping context make sure to set the currently running thread
+		struct node *temp = dequeue();
+		if(temp->data != NULL){
+			if(temp->data->state == NEW ||temp->data->state == READY){
+		current_thread = temp->data;
 		swapcontext(&curr,&temp->data->context);
+		free(temp->data->stack_pointer);
+        free(temp->data);
+        free(temp);
+			}else if(temp->data->state == BLOCKED){
+				setcontext(&main_context);
+			}
+		}else{
+			printf("error null node");
+		}
 	}
 	// - every time a timer interrupt occurs, your worker thread library 
 	// should be contexted switched from a thread context to this 
@@ -349,36 +315,29 @@ void print_app_stats(void) {
 
 // YOUR CODE HERE
 
-// FUNCTION TO ENQUEUE TO ANY QUEUE
-void enqueue(struct node **queue_head, struct TCB *thread)
-{
-    struct node *t = (struct node*)malloc(sizeof(struct node));
-    t->data = thread;
-    t->next = NULL;
-
-    if (*queue_head == NULL)
-	{
-        *queue_head = t;
-    }
-	else
-	{
-        struct node *temp = *queue_head;
-        while (temp->next != NULL)
-		{
-            temp = temp->next;
-        }
-        temp->next = t;
-    }
+//FUNCTION TO ENQUEUE TO RUNQUEUE
+void enqueue(struct TCB *thread){
+	struct node *t = (struct node*)malloc(sizeof(struct node));
+	t->data = thread;
+	if(head == NULL){
+		head = t;
+		current = head;
+	}else{
+		current->next = t;
+		current = t;
+	}
 }
 
-// METHOD TO DEQUEUE FROM ANY QUEUE
-struct node* dequeue(struct node **queue_head)
-{
-    if (*queue_head == NULL)
-	{
-        return NULL;
-    }
-    struct node *temp = *queue_head;
-    *queue_head = (*queue_head)->next;
-    return temp;
+//METHOD TO DEQUEUE FROM RUNQUEUE
+struct node* dequeue(){
+	if(head == NULL){
+		return NULL;
+	}
+	struct node *temp = head;
+	if(head->next == NULL){
+	head = NULL;
+	}else{
+		head = head->next;
+	}
+	return temp;
 }
