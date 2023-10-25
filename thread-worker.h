@@ -47,7 +47,9 @@ typedef struct Thread_wrapper {
 typedef struct worker_mutex_t {
 	/* add something here */
 	//_Atomic {LOCKED, UNLOCKED} state;
+	int isLocked;
 	int ownerId;
+	struct node *blocked_threads;
 	// YOUR CODE HERE
 } worker_mutex_t;
 
@@ -60,9 +62,8 @@ typedef struct node{
 	struct node *next;
 }Node;
 
-void enqueue(struct TCB *thread);
-
-struct node* dequeue();
+void enqueue(struct node **queue_head, struct TCB *thread);
+struct node* dequeue(struct node **queue_head);
 
 // YOUR CODE HERE
 
