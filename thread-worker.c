@@ -63,6 +63,8 @@ void* thread_wrapper(void *arg) {
     void *ret = wrapper_arg->function(wrapper_arg->arg); // Call the original function
 	wrapper_arg->thread->state = TERMINATED;
 	swapcontext(&curr,&scheduler_context);
+    free(wrapper_arg->thread->stack_pointer);
+    free(wrapper_arg->thread);
     free(wrapper_arg); // Clean up dynamically allocated memory for the argument
     return ret;
 }
@@ -228,6 +230,9 @@ static void schedule() {
 	}else{
 		struct node *temp = dequeue();
 		swapcontext(&curr,&temp->data->context);
+		free(temp->data->stack_pointer);
+        free(temp->data);
+        free(temp);
 	}
 	// - every time a timer interrupt occurs, your worker thread library 
 	// should be contexted switched from a thread context to this 
