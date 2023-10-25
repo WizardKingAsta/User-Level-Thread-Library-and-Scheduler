@@ -18,44 +18,73 @@
 #include <sys/types.h>
 #include <stdio.h>
 #include <stdlib.h>
+
+// added
 #include <ucontext.h>
+#include <signal.h>
+#include <sys/time.h>  // For ITIMER_REAL and struct itimerval
+#include <limits.h>    // For INT_MAX
+//added
 
 typedef uint worker_t;
 
-typedef struct TCB {
+typedef struct TCB
+{
 	/* add important states in a thread control block */
-	int threadId;// thread Id
-	enum {NEW, READY, RUNNING, BLOCKED, TERMINATED} state;// thread status
-	ucontext_t context;// thread context
-	void* stack_pointer;// thread stack
-	int priority;// thread priority
-	// And more ...
 
 	// YOUR CODE HERE
+
+	uint threadId;			// thread Id
+
+	ucontext_t context;		// thread context
+	void* stack_pointer;	// thread stack
+
+	int burst_time; 		// Estimated execution time
+	int elapsed; 			// Elapsed time counter
+	int response_time; 		// Elapsed time counter
+
+	int priority;			// thread priority
+
+	enum {
+		NEW,
+		READY,
+		RUNNING,
+		BLOCKED,
+		TERMINATED
+	} state; 				// thread status
+
 } tcb; 
 
 /* mutex struct definition */
-typedef struct worker_mutex_t {
+typedef struct worker_mutex_t
+{
 	/* add something here */
 	//_Atomic {LOCKED, UNLOCKED} state;
 	int ownerId;
 	// YOUR CODE HERE
+
+	int is_locked;
+	worker_t holder;
+	
 } worker_mutex_t;
 
 /* define your data structures here: */
 // Feel free to add your own auxiliary data structures (linked list or queue etc...)
 
-//create linked list runqueue 
-typedef struct node{
-	worker_t *data;
-	struct node *next;
-};
-
-void enqueue(worker_t *thread);
-
-void dequeue(worker_t *thread);
-
 // YOUR CODE HERE
+
+//create linked list runqueue 
+typedef struct node
+{
+	struct TCB *data;
+    struct node *next;
+} node_t;
+
+typedef struct
+{
+    void *(*function)(void *);
+    void *arg;
+} wrapper_arg_t;
 
 
 /* Function Declarations: */
@@ -86,6 +115,9 @@ int worker_mutex_unlock(worker_mutex_t *mutex);
 /* destroy the mutex */
 int worker_mutex_destroy(worker_mutex_t *mutex);
 
+static void schedule();
+static void sched_psjf();
+static void sched_mlfq();
 
 /* Function to print global statistics. Do not modify this function.*/
 void print_app_stats(void);
@@ -103,3 +135,14 @@ void print_app_stats(void);
 #endif
 
 #endif
+
+/*********** Helper Functions ***********/
+
+tcb* getThread(worker_t thread);
+
+void enqueue(node_t **head, tcb *new_thread);
+tcb* dequeue(node_t **head);
+tcb* dequeue_thread(node_t *head, worker_t thread_id);
+void wrapper_function(void *wrapper_arg);
+void update_global_statistics(tcb *current_thread);
+
