@@ -19,12 +19,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <ucontext.h>
+#include <sys/time.h>
+#include <signal.h>
 
 typedef uint worker_t;
 
 typedef struct TCB {
 	/* add important states in a thread control block */
-	int threadId;// thread Id
+	worker_t *threadId;// thread Id
 	enum {NEW, READY, RUNNING, BLOCKED, TERMINATED} state;// thread status
 	ucontext_t context;// thread context
 	void* stack_pointer;// thread stack
@@ -47,13 +49,13 @@ typedef struct worker_mutex_t {
 
 //create linked list runqueue 
 typedef struct node{
-	worker_t *data;
+	tcb *data;
 	struct node *next;
-};
+}Node;
 
-void enqueue(worker_t *thread);
+void enqueue(struct TCB *thread);
 
-void dequeue(worker_t *thread);
+struct node* dequeue();
 
 // YOUR CODE HERE
 

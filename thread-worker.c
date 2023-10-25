@@ -18,13 +18,67 @@ double avg_resp_time=0;
 // INITAILIZE ALL YOUR OTHER VARIABLES HERE
 // YOUR CODE HERE
 //RUNQUEUE
-static ucontext_t uctx_sched;
-//NEED TO ADD BENCHMARK CONTEXt
-static void* sched_stack_pointer;
-static accessedFirstTime = 0;
 struct node *head;
 struct node *current;
 
+//global contexts to swtich between
+static void* sched_stack_pointer;
+static ucontext_t scheduler_context;
+ucontext_t main_context;
+//NEED TO ADD BENCHMARK CONTEXt
+
+//other global declarations
+static int accessedFirstTime = 0;
+ucontext_t curr;
+static void schedule();
+
+//global timer for interupt (just basic ten seconds for FCFS rn)
+void timer_handler(int signum) {
+    swapcontext(&curr,&scheduler_context);
+}
+
+struct sigaction sa;
+
+struct itimerval timer;
+
+
+void setUpTimer(){
+sa.sa_handler = &timer_handler;
+sa.sa_flags = SA_RESTART;  // Restart functions if interrupted by handler
+sigaction(SIGPROF, &sa, NULL);
+
+// Initial expiration
+timer.it_value.tv_sec = 1;
+timer.it_value.tv_usec = 0;
+
+// Periodic interval
+timer.it_interval.tv_sec = 1;
+timer.it_interval.tv_usec = 0;
+
+// Start the timer
+setitimer(ITIMER_PROF, &timer, NULL);
+}
+
+int setUpSchedulerContext(){
+	if (getcontext(&scheduler_context) < 0){
+		perror("getcontext");
+		exit(1);
+		}
+
+		sched_stack_pointer = (void*)malloc(STACK_SIZE);
+		scheduler_context.uc_link = NULL;
+		scheduler_context.uc_stack.ss_sp = sched_stack_pointer;
+		scheduler_context.uc_stack.ss_size = STACK_SIZE;
+		scheduler_context.uc_stack.ss_flags = 0;
+
+		//makes context NEED TO CHANGE THE FUNCTION
+		getcontext(&curr);
+		makecontext(&scheduler_context,(void (*)())schedule,0);
+		//IF ACCESSED FIRST TIME MAKE THREAD HEAD OF RUNQUEUE
+		/*head = (struct node*)malloc(sizeof(struct node));
+		head->data = threadd;
+		current = head;*/
+}
 
 /* create a new thread */
 int worker_create(worker_t * thread, pthread_attr_t * attr, 
@@ -39,41 +93,44 @@ int worker_create(worker_t * thread, pthread_attr_t * attr,
        // YOUR CODE HERE
 	   struct TCB *threadd = (struct TCB*)malloc(sizeof(struct TCB)); //allocated TCB space
 
-	   threadd->threadId = &thread;
+	   if(accessedFirstTime == 0){//makes scheduler context if it has not been created yet by testing if this is first time calling create func
+	   getcontext(&main_context);
+	   setUpTimer();
+	   setUpSchedulerContext();
+	   	accessedFirstTime++;
+	   }
+	   
+	   if (getcontext(&threadd->context) < 0){
+		perror("getcontext");
+		exit(1);
+		}
+
+	   threadd->threadId = thread;
 
 	   threadd->stack_pointer = (void *)malloc(STACK_SIZE); //allocates stack space
+		if (threadd->stack_pointer == NULL){
+		perror("Failed to allocate stack");
+		exit(1);
+		}
 
 	   threadd->context.uc_link = NULL;
 	   threadd->context.uc_stack.ss_sp = threadd->stack_pointer; //sets context stack
 	   threadd->context.uc_stack.ss_size = STACK_SIZE;
 	   threadd->context.uc_stack.ss_flags=0;
 
-	   makecontext(&threadd->context,function, 1, arg); //makes context
+	   printf("about to call make  context\n");
 
-	   if(accessedFirstTime == 0){//makes scheduler context if it has not been created yet by testing if this is first time calling create func
-		sched_stack_pointer = malloc(STACK_SIZE);
-		//allocates all neccessary parts of context
-		uctx_sched.uc_link = NULL;
-		uctx_sched.uc_stack.ss_sp = sched_stack_pointer;
-		uctx_sched.uc_stack.ss_size = STACK_SIZE;
-		uctx_sched.uc_stack.ss_flags = 0;
+	   makecontext(&threadd->context,(void (*)())function, 1, arg); //makes context
 
-		//makes context NEED TO CHANGE THE FUNCTION
-		makecontext(&uctx_sched,schedule_psjf(),0);
-		//adjusts variable to 1 to show that worker create has been accessed.
-		accessedFirstTime = 1;
-		//IF ACCESSED FIRST TIME MAKE THREAD HEAD OF RUNQUEUE
-		head = (struct node*)malloc(sizeof(struct node));
-		head->data = thread;
-		current = head;
-	   }else{
-		enqueue(thread);
-	   }
+	   printf("called make context\n");
+
 
 	   threadd->state = READY; //sets thread state
 
-	   *thread = threadd;
 	   //must add to run queue
+	   enqueue(threadd);
+	   getcontext(&curr);
+	   swapcontext(&curr,&scheduler_context);
 	
     return 0;
 };
@@ -149,6 +206,12 @@ int worker_mutex_destroy(worker_mutex_t *mutex) {
 
 /* scheduler */
 static void schedule() {
+	if(head == NULL){
+		swapcontext(&curr,&main_context);
+	}else{
+		struct node *temp = dequeue();
+		swapcontext(&curr,&temp->data->context);
+	}
 	// - every time a timer interrupt occurs, your worker thread library 
 	// should be contexted switched from a thread context to this 
 	// schedule() function
@@ -203,15 +266,28 @@ void print_app_stats(void) {
 // YOUR CODE HERE
 
 //FUNCTION TO ENQUEUE TO RUNQUEUE
-void enqueue(worker_t *thread){
+void enqueue(struct TCB *thread){
 	struct node *t = (struct node*)malloc(sizeof(struct node));
 	t->data = thread;
-	current->next = t;
-	current = t;
+	if(head == NULL){
+		head = t;
+		current = head;
+	}else{
+		current->next = t;
+		current = t;
+	}
 }
 
 //METHOD TO DEQUEUE FROM RUNQUEUE
-void dequeue(worker_t *thread){
-	
-
+struct node* dequeue(){
+	if(head == NULL){
+		return NULL;
+	}
+	struct node *temp = head;
+	if(head->next == NULL){
+	head = NULL;
+	}else{
+		head = head->next;
+	}
+	return temp;
 }

@@ -2,6 +2,17 @@
   "version": "0.2.0",
   "configurations": [
     {
+      "name": "Debug test.c",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/benchmarks/test",
+      "args": [],
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "build",
+      "MIMode": "gdb"
+    },
+    {
       "name": "C/C++ Runner: Debug Session",
       "type": "lldb",
       "request": "launch",
