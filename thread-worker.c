@@ -34,7 +34,7 @@ static void schedule();
 
 //global timer for interupt (just basic ten seconds for FCFS rn)
 void timer_handler(int signum) {
-    swapcontext(&curr,&scheduler_context);
+    setcontext(&scheduler_context);
 }
 
 struct sigaction sa;
@@ -56,7 +56,15 @@ timer.it_interval.tv_sec = 1;
 timer.it_interval.tv_usec = 0;
 
 // Start the timer
-setitimer(ITIMER_PROF, &timer, NULL);
+}
+
+void* thread_wrapper(void *arg) {
+    thread_wrapper_arg_t *wrapper_arg = (thread_wrapper_arg_t *)arg;
+    void *ret = wrapper_arg->function(wrapper_arg->arg); // Call the original function
+	wrapper_arg->thread->state = TERMINATED;
+	swapcontext(&curr,&scheduler_context);
+    free(wrapper_arg); // Clean up dynamically allocated memory for the argument
+    return ret;
 }
 
 int setUpSchedulerContext(){
@@ -74,10 +82,6 @@ int setUpSchedulerContext(){
 		//makes context NEED TO CHANGE THE FUNCTION
 		getcontext(&curr);
 		makecontext(&scheduler_context,(void (*)())schedule,0);
-		//IF ACCESSED FIRST TIME MAKE THREAD HEAD OF RUNQUEUE
-		/*head = (struct node*)malloc(sizeof(struct node));
-		head->data = threadd;
-		current = head;*/
 }
 
 /* create a new thread */
@@ -94,7 +98,6 @@ int worker_create(worker_t * thread, pthread_attr_t * attr,
 	   struct TCB *threadd = (struct TCB*)malloc(sizeof(struct TCB)); //allocated TCB space
 
 	   if(accessedFirstTime == 0){//makes scheduler context if it has not been created yet by testing if this is first time calling create func
-	   getcontext(&main_context);
 	   setUpTimer();
 	   setUpSchedulerContext();
 	   	accessedFirstTime++;
@@ -104,6 +107,9 @@ int worker_create(worker_t * thread, pthread_attr_t * attr,
 		perror("getcontext");
 		exit(1);
 		}
+		getcontext(&main_context);
+		setitimer(ITIMER_PROF, &timer, NULL);
+		if(threadd->state != TERMINATED){
 
 	   threadd->threadId = thread;
 
@@ -113,6 +119,15 @@ int worker_create(worker_t * thread, pthread_attr_t * attr,
 		exit(1);
 		}
 
+		thread_wrapper_arg_t *wrapper_arg = (thread_wrapper_arg_t *)malloc(sizeof(thread_wrapper_arg_t));
+    	if(!wrapper_arg) {
+       		perror("Failed to allocate memory for wrapper_arg");
+        	return -1;
+    	}
+    	wrapper_arg->function = function;
+    	wrapper_arg->arg = arg;
+		wrapper_arg->thread = threadd;
+
 	   threadd->context.uc_link = NULL;
 	   threadd->context.uc_stack.ss_sp = threadd->stack_pointer; //sets context stack
 	   threadd->context.uc_stack.ss_size = STACK_SIZE;
@@ -120,17 +135,19 @@ int worker_create(worker_t * thread, pthread_attr_t * attr,
 
 	   printf("about to call make  context\n");
 
-	   makecontext(&threadd->context,(void (*)())function, 1, arg); //makes context
+		makecontext(&threadd->context, (void (*)())thread_wrapper, 1, wrapper_arg);
+	   //makecontext(&threadd->context,(void (*)())function, 1, arg); //makes context
 
 	   printf("called make context\n");
 
-
+		
 	   threadd->state = READY; //sets thread state
 
 	   //must add to run queue
 	   enqueue(threadd);
 	   getcontext(&curr);
 	   swapcontext(&curr,&scheduler_context);
+		}
 	
     return 0;
 };
@@ -207,7 +224,7 @@ int worker_mutex_destroy(worker_mutex_t *mutex) {
 /* scheduler */
 static void schedule() {
 	if(head == NULL){
-		swapcontext(&curr,&main_context);
+		setcontext(&main_context);
 	}else{
 		struct node *temp = dequeue();
 		swapcontext(&curr,&temp->data->context);
