@@ -16,7 +16,7 @@ double avg_resp_time=0;
 // INITAILIZE ALL YOUR OTHER VARIABLES HERE
 // YOUR CODE HERE
 
-#define DEBUG 0
+#define DEBUG 1
 
 static void schedule();
 void enqueue(struct node **queue_head, struct TCB *thread);
@@ -37,6 +37,7 @@ ucontext_t current_ctx;
 // NEED TO ADD BENCHMARK CONTEXt
 
 // other global declarations
+static int threadCount = 0;
 static int accessedFirstTime = 0;
 
 // global timer for interupt (just basic ten seconds for FCFS rn)
@@ -56,7 +57,8 @@ void setUpTimer()
 
 	struct itimerval timer;
 
-	timer.it_interval.tv_usec = 1 * 10; 
+	//timer.it_interval.tv_usec = 10 * 1000; 
+	timer.it_interval.tv_usec = 100 * 1000; 
 	timer.it_interval.tv_sec = 0;
 
 	timer.it_value.tv_usec = 1;
@@ -71,10 +73,11 @@ void* thread_wrapper(void *arg)
     thread_wrapper_arg_t *wrapper_arg = (thread_wrapper_arg_t *)arg;
     void *ret = wrapper_arg->function(wrapper_arg->arg); // Call the original function
 	wrapper_arg->thread->state = TERMINATED;
-	getcontext(&current_ctx);
+    threadCount--;
+	free(wrapper_arg); // Clean up dynamically allocated memory for the argument
 	if (DEBUG) printf("thread wrapper. thread: %lu terminated. switching to sched ctx\n", wrapper_arg->thread->threadId);
+	getcontext(&current_ctx);
 	swapcontext(&current_ctx,&scheduler_context);
-    free(wrapper_arg); // Clean up dynamically allocated memory for the argument
     return ret;
 }
 
@@ -123,6 +126,7 @@ int worker_create(worker_t * thread, pthread_attr_t * attr, void *(*function)(vo
 				threadMap[i] = threadd;
 				threadd->threadId = (worker_t)i;  // Use the index as the worker_t ID
 				*thread = threadd->threadId;
+				threadCount++;
 				break;
 			}
 		}
@@ -374,9 +378,16 @@ static void schedule()
 
 	if (runqueue_head == NULL)
 	{
-		if (DEBUG) printf("schedule. runqueue empty. switching to current ctx\n");
-		//setcontext(&current_ctx);
-		setcontext(&main_context);
+		if (threadCount == 0)
+		{
+			if (DEBUG) printf("schedule. runqueue empty. switching to main ctx\n");
+			setcontext(&main_context);
+		}
+		else
+		{
+			if (DEBUG) printf("schedule. runqueue empty. switching to current ctx\n");
+			setcontext(&current_ctx);
+		}
 	}
 	else
 	{

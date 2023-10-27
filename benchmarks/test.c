@@ -3,6 +3,36 @@
 #include <pthread.h>
 #include "../thread-worker.h"
 
+// test timer
+#if 0
+
+void threadFunction0(void *arg);
+
+int main(int argc, char **argv)
+{
+    pthread_t thread1;
+    pthread_create(&thread1, NULL, &threadFunction0, (void*)0);
+    printf("thread0: %lu\n", thread1);
+
+    // Wait for thread to finish
+    pthread_join(thread1, NULL);
+
+    printf("\n");
+    printf("exit main\n");
+   
+    return 0;
+}
+
+void threadFunction0(void *arg)
+{
+    printf("waiting\n");
+    while (1)
+    {
+        //printf("WAIT");
+    }
+}
+#endif
+
 // test pthread_join
 #if 0
 
