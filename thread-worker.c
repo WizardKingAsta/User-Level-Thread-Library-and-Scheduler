@@ -1,8 +1,8 @@
 // File:	thread-worker.c
 
-// List all group member's name:
-// username of iLab:
-// iLab Server:
+// List all group member's name: Trevor Dovan, Maanav
+// username of iLab: ilab3 
+// iLab Server: ilab3.cs.rutgers.edu
 
 #include "thread-worker.h"
 #define STACK_SIZE 1024
@@ -17,34 +17,46 @@ double avg_resp_time=0;
 // YOUR CODE HERE
 
 #define DEBUG 1
+#define MAX_THREADS 128
 
-static void schedule();
-void enqueue(struct node **queue_head, struct TCB *thread);
-struct node* dequeue(struct node **queue_head);
+static void 		schedule();
+static void 		sched_psjf();
+static void 		sched_mlfq();
 
-struct TCB* threadMap[MAX_THREADS] = {NULL};
+int 				setUpSchedulerContext();
+void 				setUpTimer();
+void 				timer_handler(int signum);
+void* 				thread_wrapper(void *arg);
+void 				enqueue(struct node **queue_head, struct TCB *thread);
+struct node* 		dequeue(struct node **queue_head);
 
-// RUNQUEUE
-struct node *runqueue_head;
+struct TCB* 		threadMap[MAX_THREADS] = {NULL};
+struct TCB*			current_thread;
+static int 			threadCount = 0;
 
-struct TCB *current_thread;
+struct node*		runqueue_head;
 
 // global contexts to swtich between
-static void* sched_stack_pointer;
-static ucontext_t scheduler_context;
-ucontext_t main_context;
-ucontext_t current_ctx;
-// NEED TO ADD BENCHMARK CONTEXt
+static ucontext_t 	scheduler_context;
+static ucontext_t 	current_ctx;
+// ADD BENCHMARK CONTEXt
 
 // other global declarations
-static int threadCount = 0;
-static int accessedFirstTime = 0;
+static void* 		sched_stack_pointer;
+static int 			accessedFirstTime = 0;
+static int 			isInScheduler = 0;
 
-// global timer for interupt (just basic ten seconds for FCFS rn)
 void timer_handler(int signum)
 {
-	if (DEBUG) printf("timer hit. switching to sched ctx\n");
+	if (DEBUG) printf("timer hit. ");
+	if (isInScheduler)
+	{
+		if (DEBUG) printf("already in scheduler. returning\n");
+		return;
+	}
+
 	getcontext(&current_ctx);
+	if (DEBUG) printf("switching to sched ctx\n");
 	swapcontext(&current_ctx,&scheduler_context);
 }
 
@@ -64,7 +76,7 @@ void setUpTimer()
 	timer.it_value.tv_usec = 1;
 	timer.it_value.tv_sec = 0;
 
-		// Set the timer up (start the timer)
+	// start the timer
 	setitimer(ITIMER_PROF, &timer, NULL);
 }
 
@@ -75,29 +87,12 @@ void* thread_wrapper(void *arg)
 	wrapper_arg->thread->state = TERMINATED;
     threadCount--;
 	free(wrapper_arg); // Clean up dynamically allocated memory for the argument
-	if (DEBUG) printf("thread wrapper. thread: %lu terminated. switching to sched ctx\n", wrapper_arg->thread->threadId);
-	getcontext(&current_ctx);
-	swapcontext(&current_ctx,&scheduler_context);
+
+	if (DEBUG) printf("thread wrapper. thread: %u terminated. switching to sched ctx\n", wrapper_arg->thread->threadId);
+	setcontext(&scheduler_context);
+
+	// dont think this ever gets hit
     return ret;
-}
-
-int setUpSchedulerContext()
-{
-	if (getcontext(&scheduler_context) < 0)
-	{
-		perror("getcontext");
-		exit(1);
-	}
-
-	sched_stack_pointer = (void*)malloc(STACK_SIZE);
-	scheduler_context.uc_link = NULL;
-	scheduler_context.uc_stack.ss_sp = sched_stack_pointer;
-	scheduler_context.uc_stack.ss_size = STACK_SIZE;
-	scheduler_context.uc_stack.ss_flags = 0;
-
-	//makes context NEED TO CHANGE THE FUNCTION
-	getcontext(&current_ctx);
-	makecontext(&scheduler_context,(void (*)())schedule,0);
 }
 
 /* create a new thread */
@@ -110,6 +105,8 @@ int worker_create(worker_t * thread, pthread_attr_t * attr, void *(*function)(vo
 	//   make it ready for the execution.
 
 	// YOUR CODE HERE
+
+	// init Thread Control Block (TCB)
 	struct TCB *threadd = (struct TCB*)malloc(sizeof(struct TCB));
 	
 	if (getcontext(&threadd->context) < 0)
@@ -118,62 +115,63 @@ int worker_create(worker_t * thread, pthread_attr_t * attr, void *(*function)(vo
 		exit(1);
 	}
 
-	if (threadd->state != TERMINATED && threadd->state != BLOCKED)
+	// add thread to threadMap, increment threadCount
+	for (int i = 0; i < MAX_THREADS; i++)
 	{
-		// Find an empty spot in the threadMap (refacator this)
-		for (int i = 0; i < MAX_THREADS; i++) {
-			if (threadMap[i] == NULL) {
-				threadMap[i] = threadd;
-				threadd->threadId = (worker_t)i;  // Use the index as the worker_t ID
-				*thread = threadd->threadId;
-				threadCount++;
-				break;
-			}
-		}
-
-		// allocates stack space
-		threadd->stack_pointer = (void *)malloc(STACK_SIZE);
-		if (threadd->stack_pointer == NULL)
-		{
-			perror("Failed to allocate stack");
-			exit(1);
-		}
-
-		thread_wrapper_arg_t *wrapper_arg = (thread_wrapper_arg_t *)malloc(sizeof(thread_wrapper_arg_t));
-		if (!wrapper_arg)
-		{
-			perror("Failed to allocate memory for wrapper_arg");
-			return -1;
-		}
-
-		wrapper_arg->function = function;
-		wrapper_arg->arg = arg;
-		wrapper_arg->thread = threadd;
-
-		threadd->context.uc_link = NULL;
-		threadd->context.uc_stack.ss_sp = threadd->stack_pointer; //sets context stack
-		threadd->context.uc_stack.ss_size = STACK_SIZE;
-		threadd->context.uc_stack.ss_flags=0;
-
-		makecontext(&threadd->context, (void (*)())thread_wrapper, 1, wrapper_arg);
-
-		threadd->state = READY;
-
-		// add to run queue
-		enqueue(&runqueue_head, threadd);
-
-		// init scheduler context and timer
-		if (accessedFirstTime == 0)
-		{
-			accessedFirstTime++;
-			setUpSchedulerContext();
-			setUpTimer();
-			getcontext(&main_context);
+		if (threadMap[i] == NULL) {
+			threadMap[i] = threadd;
+			threadd->threadId = (worker_t)i;  // Use the index as the worker_t ID
+			*thread = threadd->threadId;
+			threadCount++;
+			break;
 		}
 	}
 
-	
-	// switch back to main/caller
+	// allocate stack space
+	threadd->stack_pointer = (void *)malloc(STACK_SIZE);
+	if (threadd->stack_pointer == NULL)
+	{
+		perror("Failed to allocate stack");
+		exit(1);
+	}
+
+	// wrap function
+	thread_wrapper_arg_t *wrapper_arg = (thread_wrapper_arg_t *)malloc(sizeof(thread_wrapper_arg_t));
+	if (!wrapper_arg)
+	{
+		perror("Failed to allocate memory for wrapper_arg");
+		return -1;
+	}
+
+	wrapper_arg->function = function;
+	wrapper_arg->arg = arg;
+	wrapper_arg->thread = threadd;
+
+	// init thread context
+	threadd->context.uc_link = NULL;
+	threadd->context.uc_stack.ss_sp = threadd->stack_pointer; // sets context stack
+	threadd->context.uc_stack.ss_size = STACK_SIZE;
+	threadd->context.uc_stack.ss_flags=0;
+
+	makecontext(&threadd->context, (void (*)())thread_wrapper, 1, wrapper_arg);
+
+	threadd->state = READY;
+
+	// add to run queue
+	enqueue(&runqueue_head, threadd);
+
+	// init scheduler context and timer
+	if (accessedFirstTime == 0)
+	{
+		accessedFirstTime++;
+		setUpSchedulerContext();
+		setUpTimer();
+
+		// setup TCB for main?
+		//getcontext(&main_context); // save main context during first call
+	}
+
+	// switch back to caller
     return 0;
 };
 
@@ -187,19 +185,25 @@ int worker_yield()
 	// YOUR CODE HERE
 	if (current_thread)
 	{
+		// set to ready add to runqueue
 		current_thread->state = READY;
 		enqueue(&runqueue_head, current_thread);
+
+		// save thread's context
 		getcontext(&current_thread->context);
-		if (DEBUG) printf("worker yield. threadId: %lu yielding. switching to sched ctx\n", current_thread->threadId);
+
+		// swap to scheluder
+		if (DEBUG) printf("worker yield. threadId: %u yielding. switching to sched ctx\n", current_thread->threadId);
 	   	swapcontext(&current_thread->context, &scheduler_context);
 	}
 	else
 	{
 		getcontext(&current_ctx);
-		if (DEBUG) printf("worker yield. switching to sched ctx\n");
+
+		if (DEBUG) printf("worker yield. current thread null. switching to sched ctx\n");
 	   	swapcontext(&current_ctx,&scheduler_context);
 	}
-	
+
 	return 0;
 };
 
@@ -216,14 +220,14 @@ void worker_exit(void *value_ptr) {
         	current_thread->exit_value = value_ptr;
 		}
 		if (DEBUG) printf("worker exit. switching to sched ctx\n");
-        swapcontext(&current_thread->context, &scheduler_context);
+        setcontext(&scheduler_context);
 		//free(currentThread);
 	}
 	else
 	{
 		getcontext(&current_ctx);
 		if (DEBUG) printf("worker exit. switching to sched ctx\n");
-	   	swapcontext(&current_ctx,&scheduler_context);
+	   	setcontext(&scheduler_context);
 	}
 
 
@@ -237,8 +241,6 @@ int worker_join(worker_t thread, void **value_ptr)
 	
 	// YOUR CODE HERE
 
-	// need to cast a worker_t thread to struct TCB
-    //struct TCB *target_thread = (struct TCB *)thread;
 	struct TCB *target_thread = threadMap[thread];
 
 	if (target_thread == NULL)
@@ -249,6 +251,7 @@ int worker_join(worker_t thread, void **value_ptr)
     // Spin wait for the thread to terminate
     while (target_thread->state != TERMINATED) 
 	{
+		//getcontext(&target_thread->joinContext);
         worker_yield(); // Yield the CPU to allow other threads to run
     }
 
@@ -262,6 +265,7 @@ int worker_join(worker_t thread, void **value_ptr)
     free(target_thread->stack_pointer);
     free(target_thread);
 
+	//setcontext(&target_thread->joinContext);
     return 0;
 };
 
@@ -375,33 +379,7 @@ static void schedule()
 	// - every time a timer interrupt occurs, your worker thread library 
 	//   should be contexted switched from a thread context to this 
 	//   schedule() function
-
-	if (runqueue_head == NULL)
-	{
-		if (threadCount == 0)
-		{
-			if (DEBUG) printf("schedule. runqueue empty. switching to main ctx\n");
-			setcontext(&main_context);
-		}
-		else
-		{
-			if (DEBUG) printf("schedule. runqueue empty. switching to current ctx\n");
-			setcontext(&current_ctx);
-		}
-	}
-	else
-	{
-		struct node *currThreadNode = dequeue(&runqueue_head);
-		current_thread = currThreadNode->data;
-		//if (DEBUG) printf("schedule. setting current ctx. threadId: %lu\n", current_thread->threadId);
-		//getcontext(&current_ctx);
-		if (DEBUG) printf("schedule. switching to current thread ctx. threadId: %lu\n", current_thread->threadId);
-		//swapcontext(&current_ctx,&current_thread->context);
-		setcontext(&current_thread->context);
-	}
-
-	// - invoke scheduling algorithms according to the policy (PSJF or MLFQ)
-
+	
 	// if (sched == PSJF)
 	//		sched_psjf();
 	// else if (sched == MLFQ)
@@ -409,26 +387,48 @@ static void schedule()
 
 	// YOUR CODE HERE
 
-// - schedule policy
-#ifndef MLFQ
-	// Choose PSJF
-#else 
-	// Choose MLFQ
-#endif
+	isInScheduler = 1;
+	if (runqueue_head == NULL)
+	{
+		if (DEBUG) printf("schedule. runqueue empty. switching back to current ctx\n");
+		isInScheduler = 0;
+		setcontext(&current_ctx);
+	}
+	else
+	{
+		struct node *currThreadNode = dequeue(&runqueue_head);
+		current_thread = currThreadNode->data;
 
+		if (DEBUG) printf("schedule. switching to thread ctx. threadId: %u\n", current_thread->threadId);
+		isInScheduler = 0;
+		setcontext(&current_thread->context);
+
+		// - invoke scheduling algorithms according to the policy (PSJF or MLFQ)
+#ifndef MLFQ
+		// Choose PSJF
+		//sched_psjf();
+
+#else 
+		// Choose MLFQ
+		//sched_mlfq();
+#endif
+	}
+
+	isInScheduler = 0;
 }
 
 /* Pre-emptive Shortest Job First (POLICY_PSJF) scheduling algorithm */
-static void sched_psjf() {
+static void sched_psjf()
+{
 	// - your own implementation of PSJF
 	// (feel free to modify arguments and return types)
 
 	// YOUR CODE HERE
 }
 
-
 /* Preemptive MLFQ scheduling algorithm */
-static void sched_mlfq() {
+static void sched_mlfq()
+{
 	// - your own implementation of MLFQ
 	// (feel free to modify arguments and return types)
 
@@ -447,7 +447,24 @@ void print_app_stats(void) {
 
 // YOUR CODE HERE
 
-// FUNCTION TO ENQUEUE TO ANY QUEUE
+int setUpSchedulerContext()
+{
+	if (getcontext(&scheduler_context) < 0)
+	{
+		perror("getcontext");
+		exit(1);
+	}
+
+	sched_stack_pointer = (void*)malloc(STACK_SIZE);
+	scheduler_context.uc_link = NULL;
+	scheduler_context.uc_stack.ss_sp = sched_stack_pointer;
+	scheduler_context.uc_stack.ss_size = STACK_SIZE;
+	scheduler_context.uc_stack.ss_flags = 0;
+
+	getcontext(&current_ctx);
+	makecontext(&scheduler_context,(void (*)())schedule,0);
+}
+
 void enqueue(struct node **queue_head, struct TCB *thread)
 {
 	if (queue_head == NULL || thread == NULL)
@@ -475,7 +492,6 @@ void enqueue(struct node **queue_head, struct TCB *thread)
     }
 }
 
-// METHOD TO DEQUEUE FROM ANY QUEUE
 struct node* dequeue(struct node **queue_head)
 {
 	if (queue_head == NULL)

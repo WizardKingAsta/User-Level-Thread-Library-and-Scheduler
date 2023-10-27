@@ -3,7 +3,7 @@
 #include <pthread.h>
 #include "../thread-worker.h"
 
-// test timer
+// test timer (DEBUG must be set to 1)
 #if 0
 
 void threadFunction0(void *arg);
@@ -44,7 +44,7 @@ int main(int argc, char **argv)
     //worker_t thread1;
     pthread_t thread1;
     pthread_create(&thread1, NULL, &threadFunction0, (void*)0);
-    printf("thread0: %lu\n", thread1);
+    printf("thread0: %u\n", thread1);
 
     // Wait for thread to finish
     pthread_join(thread1, NULL);
@@ -61,7 +61,7 @@ void threadFunction0(void *arg)
 
     pthread_t thread2;
     pthread_create(&thread2, NULL, &threadFunction1, (void*)0);
-    printf("thread1: %lu\n", thread2);
+    printf("thread1: %u\n", thread2);
 
     // Wait for thread to finish
     pthread_join(thread2, NULL);
