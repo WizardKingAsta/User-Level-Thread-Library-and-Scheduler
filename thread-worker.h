@@ -16,56 +16,65 @@
 #include <unistd.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
+#include <sys/time.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
+#include <string.h> 
 #include <ucontext.h>
-#include <sys/time.h>
 #include <signal.h>
 
 typedef uint worker_t;
 
-typedef struct TCB {
+typedef struct TCB
+{
 	/* add important states in a thread control block */
-	worker_t *threadId;// thread Id
-	enum {NEW, READY, RUNNING, BLOCKED, TERMINATED} state;// thread status
-	ucontext_t context;// thread context
-	void* stack_pointer;// thread stack
-	int priority;// thread priority
-	// And more ...
-
 	// YOUR CODE HERE
+	worker_t threadId;			// thread Id
+	ucontext_t context;			// thread context
+	void *stack_pointer;		// thread stack
+	int priority;				// thread priority
+	void *exit_value;			// thread exit value
+	enum { NEW, READY, RUNNING, BLOCKED, TERMINATED } state; // thread status
+
 } tcb; 
 
-typedef struct Thread_wrapper {
+typedef struct Thread_wrapper
+{
     void *(*function)(void*);
     void *arg;
 	struct TCB *thread;
+
 } thread_wrapper_arg_t;
 
 
 /* mutex struct definition */
-typedef struct worker_mutex_t {
+typedef struct worker_mutex_t
+{
 	/* add something here */
+	// YOUR CODE HERE
+
 	//_Atomic {LOCKED, UNLOCKED} state;
 	int isLocked;
 	int ownerId;
 	struct node *blocked_threads;
-	// YOUR CODE HERE
+
 } worker_mutex_t;
 
 /* define your data structures here: */
 // Feel free to add your own auxiliary data structures (linked list or queue etc...)
+// YOUR CODE HERE
 
 //create linked list runqueue 
-typedef struct node{
+typedef struct node
+{
 	tcb *data;
 	struct node *next;
-}Node;
 
-void enqueue(struct node **queue_head, struct TCB *thread);
-struct node* dequeue(struct node **queue_head);
+} Node;
 
-// YOUR CODE HERE
+#define MAX_THREADS 128
+extern struct TCB* threadMap[MAX_THREADS];
 
 
 /* Function Declarations: */
