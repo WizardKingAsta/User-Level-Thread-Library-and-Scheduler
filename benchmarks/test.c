@@ -78,7 +78,8 @@ void threadFunction1(void *arg)
 }
 #endif
 
-// infinite mutex lock loop
+// infinite mutex lock loop (loops on second lock but hits seg fault)
+// for some reason having DEBUG set breaks this test
 #if 1
 
 // Define a shared resource
