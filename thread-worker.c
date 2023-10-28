@@ -86,6 +86,7 @@ void* thread_wrapper(void *arg)
 {
     thread_wrapper_arg_t *wrapper_arg = (thread_wrapper_arg_t *)arg;
     void *ret = wrapper_arg->function(wrapper_arg->arg); // Call the original function
+	wrapper_arg->thread->exit_value = ret;
 	wrapper_arg->thread->state = TERMINATED;
     threadCount--;
 	free(wrapper_arg); // Clean up dynamically allocated memory for the argument
@@ -216,6 +217,7 @@ int worker_yield()
 void worker_exit(void *value_ptr) {
 	// - de-allocate any dynamic memory created when starting this thread
 	// YOUR CODE HERE
+
 	if (current_thread)
 	{
         current_thread->state = TERMINATED;
@@ -224,14 +226,13 @@ void worker_exit(void *value_ptr) {
 		{
         	current_thread->exit_value = value_ptr;
 		}
-		if (DEBUG) printf("worker exit. switching to sched ctx\n");
+		if (DEBUG) printf("worker exit. thread terminated. switching to sched ctx\n");
         setcontext(&scheduler_ctx);
-		//free(currentThread);
 	}
 	else
 	{
 		getcontext(&current_ctx);
-		if (DEBUG) printf("worker exit. switching to sched ctx\n");
+		if (DEBUG) printf("worker exit. current thread null. switching to sched ctx\n");
 	   	setcontext(&scheduler_ctx);
 	}
 
@@ -266,8 +267,8 @@ int worker_join(worker_t thread, void **value_ptr)
     }
 
     // Clean up the resources
-    free(target_thread->stack_pointer);
-    free(target_thread);
+    //free(target_thread->stack_pointer);
+    //free(target_thread);
 
     return 0;
 };
