@@ -1,7 +1,7 @@
 // File:	thread-worker.c
 
-// List all group member's name: Trevor Dovan, Maanav
-// username of iLab: td441,
+// List all group member's name: Trevor Dovan, Maanav Choudhary
+// username of iLab: td441, mc2432
 // iLab Server: rlab1.cs.rutgers.edu
 
 #include "thread-worker.h"
