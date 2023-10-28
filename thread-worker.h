@@ -1,6 +1,6 @@
 // File:	worker_t.h
 
-// List all group member's name: Trevor Dovan, Maanav
+// List all group member's name: Trevor Dovan, Maanav Choudhary
 // username of iLab: ilab3 
 // iLab Server: ilab3.cs.rutgers.edu
 
