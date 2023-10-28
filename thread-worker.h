@@ -1,8 +1,8 @@
 // File:	worker_t.h
 
-// List all group member's name:
-// username of iLab:
-// iLab Server:
+// List all group member's name: Trevor Dovan, Maanav
+// username of iLab: ilab3 
+// iLab Server: ilab3.cs.rutgers.edu
 
 #ifndef WORKER_T_H
 #define WORKER_T_H
@@ -10,53 +10,68 @@
 #define _GNU_SOURCE
 
 /* To use Linux pthread Library in Benchmark, you have to comment the USE_WORKERS macro */
-#define USE_WORKERS 1
+#define USE_WORKERS 0
 
 /* include lib header files that you need here: */
 #include <unistd.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
+#include <sys/time.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
+#include <string.h> 
 #include <ucontext.h>
+#include <signal.h>
 
 typedef uint worker_t;
 
-typedef struct TCB {
+typedef struct TCB
+{
 	/* add important states in a thread control block */
-	int threadId;// thread Id
-	enum {NEW, READY, RUNNING, BLOCKED, TERMINATED} state;// thread status
-	ucontext_t context;// thread context
-	void* stack_pointer;// thread stack
-	int priority;// thread priority
-	// And more ...
-
 	// YOUR CODE HERE
+	worker_t 	threadId;			// thread Id
+	ucontext_t 	context;			// thread context
+	void*		stack_pointer;		// thread stack
+	int			priority;			// thread priority
+	void*		exit_value;			// thread exit value
+	enum { NEW, READY, RUNNING, BLOCKED, TERMINATED } state; // thread status
+
 } tcb; 
 
+typedef struct Thread_wrapper
+{
+    void *(*function)(void*);
+    void *arg;
+	struct TCB *thread;
+
+} thread_wrapper_arg_t;
+
+
 /* mutex struct definition */
-typedef struct worker_mutex_t {
+typedef struct worker_mutex_t
+{
 	/* add something here */
-	//_Atomic {LOCKED, UNLOCKED} state;
-	int ownerId;
 	// YOUR CODE HERE
+
+	//_Atomic {LOCKED, UNLOCKED} state;
+	int isLocked;
+	worker_t ownerId;
+	struct node *blocked_threads;
+
 } worker_mutex_t;
 
 /* define your data structures here: */
 // Feel free to add your own auxiliary data structures (linked list or queue etc...)
-
-//create linked list runqueue 
-typedef struct node{
-	worker_t *data;
-	struct node *next;
-};
-
-void enqueue(worker_t *thread);
-
-void dequeue(worker_t *thread);
-
 // YOUR CODE HERE
 
+// linked list runqueue 
+typedef struct node
+{
+	tcb *data;
+	struct node *next;
+
+} Node;
 
 /* Function Declarations: */
 
@@ -74,8 +89,7 @@ void worker_exit(void *value_ptr);
 int worker_join(worker_t thread, void **value_ptr);
 
 /* initial the mutex lock */
-int worker_mutex_init(worker_mutex_t *mutex, const pthread_mutexattr_t
-    *mutexattr);
+int worker_mutex_init(worker_mutex_t *mutex, const pthread_mutexattr_t *mutexattr);
 
 /* aquire the mutex lock */
 int worker_mutex_lock(worker_mutex_t *mutex);
