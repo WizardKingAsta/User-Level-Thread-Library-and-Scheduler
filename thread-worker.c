@@ -19,7 +19,7 @@ double avg_resp_time=0;
 long num_completed_threads = 0; // Counter for avg_turn_time
 long num_responded_threads = 0; // Counter for avg_resp_time
 
-#define DEBUG 1
+#define DEBUG 0
 #define QUANTUM 10 * 1000
 #define MAX_THREADS 128 // threadMap size
 
@@ -46,41 +46,32 @@ struct node*		runqueue_head;
 // global contexts to swtich between
 static ucontext_t 	scheduler_ctx;
 static ucontext_t 	current_ctx;
-// ADD BENCHMARK CONTEXt
+// ADD BENCHMARK CONTEXT
 
 // other global declarations
 static void* 		sched_stack_pointer;
 static int 			accessedFirstTime = 0;
 static int 			isInScheduler = 0;
+static long 		timerCounter = 0;
 
-static long timerCounter = 0;
 void timer_handler(int signum)
 {
 	timerCounter++;
-	//printf("timer hit %ld. \n", timerCounter);
 	if (DEBUG) printf("timer hit %ld. ", timerCounter);
 
-	// is this needed?
-	if (isInScheduler)
-	{
-		if (DEBUG) printf("already in scheduler. returning\n");
-		return;
-	}
-
-	// update elapsed quantums for thread
 	if (current_thread != NULL)
 	{
+		// update elapsed quantums for thread
 		current_thread->elapsed_quantums++;
-	}
 
-	if (DEBUG) printf("switching to sched ctx\n");
-	tot_cntx_switches++;
-	if (current_thread)
-	{
-		swapcontext(&current_thread->context,&scheduler_ctx);
+		if (DEBUG) printf("save thread%u ctx. switching to sched ctx\n", current_thread->threadId);
+		tot_cntx_switches++;
+		swapcontext(&current_thread->context,&scheduler_ctx);;
 	}
 	else
 	{
+		if (DEBUG) printf("current thread null. switching to sched ctx\n");
+		tot_cntx_switches++;
 		swapcontext(&current_ctx,&scheduler_ctx);
 	}
 }
@@ -252,7 +243,7 @@ int worker_yield()
 		enqueue(&runqueue_head, current_thread);
 
 		// save thread's context
-		//getcontext(&current_thread->context);
+		getcontext(&current_thread->context);
 
 		// swap to scheduler
 		if (DEBUG) printf("worker yield. threadId: %u yielding. switching to sched ctx\n", current_thread->threadId);
@@ -272,7 +263,8 @@ int worker_yield()
 };
 
 /* terminate a thread */
-void worker_exit(void *value_ptr) {
+void worker_exit(void *value_ptr)
+{
 	// - de-allocate any dynamic memory created when starting this thread
 	// YOUR CODE HERE
 
@@ -374,8 +366,8 @@ int worker_mutex_lock(worker_mutex_t *mutex)
 		// Add the current thread to the blocked threads list of the mutex
 		enqueue(&mutex->blocked_threads, current_thread);
 
-		getcontext(&current_thread->context);
-		if (DEBUG) printf("worker mutex lock. thread%u waiting. switching to sched ctx\n", current_thread->threadId);
+		//getcontext(&current_thread->context);
+		if (DEBUG) printf("worker mutex lock. thread%u blocked. switching to sched ctx\n", current_thread->threadId);
 		tot_cntx_switches++;
 		swapcontext(&current_thread->context, &scheduler_ctx);
 	}
@@ -498,11 +490,12 @@ static void sched_psjf()
 			// if current thread running is selected, resume
 			if (current_thread == selected_thread)
 			{
-				setcontext(&current_ctx);
+				//setcontext(&current_ctx);
+				setcontext(&current_thread->context);
 			}
 
-			// enque the current thread back to the runqueue, set state from running to
-			if (current_thread->state != TERMINATED) {
+			// enqueue the current thread back to the runqueue, set state from running to
+			if (current_thread->state != TERMINATED && current_thread->state != BLOCKED) {
 				current_thread->state = READY;
 				if (DEBUG) printf("scheduler. adding thread: %u to runqueue\n", current_thread->threadId);
 				enqueue(&runqueue_head, current_thread);
@@ -522,6 +515,7 @@ static void sched_psjf()
 		}
 
         tot_cntx_switches++;
+		if (DEBUG) printf("scheduler. setting ctx to thread: %u\n", selected_thread->threadId);
 		setcontext(&current_thread->context);
     }
 }
@@ -631,18 +625,24 @@ struct node* dequeue(struct node **queue_head)
 
 struct node* dequeue_thread(struct node **queue_head, worker_t threadId)
 {
-    if (queue_head == NULL || *queue_head == NULL) {
+    if (queue_head == NULL || *queue_head == NULL)
+	{
         return NULL;
     }
 
     struct node *current = *queue_head;
     struct node *previous = NULL;
 
-    while (current != NULL) {
-        if (current->data->threadId == threadId) {
-            if (previous == NULL) { // The thread is at the head of the queue
+    while (current != NULL)
+	{
+        if (current->data->threadId == threadId)
+		{
+            if (previous == NULL)
+			{
                 *queue_head = current->next;
-            } else {
+            }
+			else
+			{
                 previous->next = current->next;
             }
             return current;
