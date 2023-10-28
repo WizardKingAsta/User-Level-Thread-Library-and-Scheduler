@@ -248,6 +248,7 @@ int worker_yield()
 	{
 		// set to ready add to runqueue
 		current_thread->state = READY;
+		if (DEBUG) printf("worker yield. adding thread: %u to runqueue\n", current_thread->threadId);
 		enqueue(&runqueue_head, current_thread);
 
 		// save thread's context
@@ -503,11 +504,13 @@ static void sched_psjf()
 			// enque the current thread back to the runqueue, set state from running to
 			if (current_thread->state != TERMINATED) {
 				current_thread->state = READY;
+				if (DEBUG) printf("scheduler. adding thread: %u to runqueue\n", current_thread->threadId);
 				enqueue(&runqueue_head, current_thread);
 			}
 		}
 
         // Remove the selected thread from the runqueue
+		if (DEBUG) printf("scheduler. removing thread: %u from runqueue\n", selected_thread->threadId);
         struct node *currThreadNode = dequeue_thread(&runqueue_head, selected_thread->threadId);
 		current_thread = currThreadNode->data;
 		current_thread->state = RUNNING;
