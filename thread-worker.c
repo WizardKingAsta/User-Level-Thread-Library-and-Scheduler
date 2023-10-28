@@ -1,8 +1,8 @@
 // File:	thread-worker.c
 
 // List all group member's name: Trevor Dovan, Maanav
-// username of iLab: ilab3 
-// iLab Server: ilab3.cs.rutgers.edu
+// username of iLab: td441,
+// iLab Server: rlab1.cs.rutgers.edu
 
 #include "thread-worker.h"
 #define STACK_SIZE 1024
@@ -16,19 +16,26 @@ double avg_resp_time=0;
 // INITAILIZE ALL YOUR OTHER VARIABLES HERE
 // YOUR CODE HERE
 
-#define DEBUG 0
-#define MAX_THREADS 128
+long num_completed_threads = 0; // Counter for avg_turn_time
+long num_responded_threads = 0; // Counter for avg_resp_time
 
-static void 		schedule();
-static void 		sched_psjf();
-static void 		sched_mlfq();
+#define DEBUG 1
+#define QUANTUM 10 * 1000
+#define MAX_THREADS 128 // threadMap size
 
-int 				setUpSchedulerContext();
-void 				setUpTimer();
-void 				timer_handler(int signum);
-void* 				thread_wrapper(void *arg);
-void 				enqueue(struct node **queue_head, struct TCB *thread);
-struct node* 		dequeue(struct node **queue_head);
+static void			schedule();
+static void			sched_psjf();
+static void			sched_mlfq();
+
+int					setUpSchedulerContext();
+void				setUpTimer();
+void				timer_handler(int signum);
+void*				thread_wrapper(void *arg);
+void				enqueue(struct node **queue_head, struct TCB *thread);
+struct node*		dequeue(struct node **queue_head);
+struct node*		dequeue_thread(struct node **queue_head, worker_t threadId);
+void 				update_response_time(long responseTime);
+void 				update_turnaround_time(long turnaroundTime);
 
 struct TCB* 		threadMap[MAX_THREADS] = {NULL};
 struct TCB*			current_thread;
@@ -46,20 +53,36 @@ static void* 		sched_stack_pointer;
 static int 			accessedFirstTime = 0;
 static int 			isInScheduler = 0;
 
-static int timerCounter = 0;
+static long timerCounter = 0;
 void timer_handler(int signum)
 {
 	timerCounter++;
-	if (DEBUG) printf("timer hit %d. ", timerCounter);
+	//printf("timer hit %ld. \n", timerCounter);
+	if (DEBUG) printf("timer hit %ld. ", timerCounter);
 
+	// is this needed?
 	if (isInScheduler)
 	{
 		if (DEBUG) printf("already in scheduler. returning\n");
 		return;
 	}
 
+	// update elapsed quantums for thread
+	if (current_thread != NULL)
+	{
+		current_thread->elapsed_quantums++;
+	}
+
 	if (DEBUG) printf("switching to sched ctx\n");
-	swapcontext(&current_ctx,&scheduler_ctx);
+	tot_cntx_switches++;
+	if (current_thread)
+	{
+		swapcontext(&current_thread->context,&scheduler_ctx);
+	}
+	else
+	{
+		swapcontext(&current_ctx,&scheduler_ctx);
+	}
 }
 
 void setUpTimer()
@@ -71,11 +94,13 @@ void setUpTimer()
 
 	struct itimerval timer;
 
-	//timer.it_interval.tv_usec = 10 * 1000; 
-	timer.it_interval.tv_usec = 100 * 1000; 
+	// this interveral will be one quantum
+	// initial timer should be same as interval to ensure proper fairness between threads
+	timer.it_interval.tv_usec = QUANTUM; // 10ms
 	timer.it_interval.tv_sec = 0;
 
-	timer.it_value.tv_usec = 1;
+	//timer.it_value.tv_usec = 1
+	timer.it_value.tv_usec = QUANTUM; // 10ms
 	timer.it_value.tv_sec = 0;
 
 	// start the timer
@@ -89,9 +114,14 @@ void* thread_wrapper(void *arg)
 	wrapper_arg->thread->exit_value = ret;
 	wrapper_arg->thread->state = TERMINATED;
     threadCount--;
+
+	long turnaroundTime = (timerCounter * QUANTUM) - current_thread->created_time;
+    update_turnaround_time(turnaroundTime);
+
 	free(wrapper_arg); // Clean up dynamically allocated memory for the argument
 
 	if (DEBUG) printf("thread wrapper. thread: %u terminated. switching to sched ctx\n", wrapper_arg->thread->threadId);
+	tot_cntx_switches++;
 	setcontext(&scheduler_ctx);
 
 	// dont think this ever gets hit
@@ -109,7 +139,7 @@ int worker_create(worker_t * thread, pthread_attr_t * attr, void *(*function)(vo
 
 	// YOUR CODE HERE
 
-	// init Thread Control Block (TCB)
+	// create Thread Control Block (TCB)
 	struct TCB *threadd = (struct TCB*)malloc(sizeof(struct TCB));
 	
 	if (getcontext(&threadd->context) < 0)
@@ -117,6 +147,12 @@ int worker_create(worker_t * thread, pthread_attr_t * attr, void *(*function)(vo
 		perror("getcontext");
 		exit(1);
 	}
+
+	threadd->elapsed_quantums = 0;
+	threadd->first_sched_time = 0;
+	threadd->created_time = timerCounter * QUANTUM;
+	threadd->priority = 0;
+	threadd->state = NEW;
 
 	// add thread to threadMap, increment threadCount
 	for (int i = 0; i < MAX_THREADS; i++)
@@ -170,8 +206,29 @@ int worker_create(worker_t * thread, pthread_attr_t * attr, void *(*function)(vo
 		setUpSchedulerContext();
 		setUpTimer();
 
-		// setup TCB for main?
-		//getcontext(&main_context); // save main context during first call
+		//setup TCB for main?
+
+		// struct TCB *main_tcb = (struct TCB*)malloc(sizeof(struct TCB));
+		// // add thread to threadMap, increment threadCount
+		// for (int i = 0; i < MAX_THREADS; i++)
+		// {
+		// 	if (threadMap[i] == NULL) {
+		// 		threadMap[i] = main_tcb;
+		// 		main_tcb->threadId = (worker_t)i;  // Use the index as the worker_t ID
+		// 		//threadCount++;
+		// 		break;
+		// 	}
+		// }
+		// main_tcb->elapsed_quantums = 0;
+		// main_tcb->first_sched_time = 0;
+		// main_tcb->created_time = timerCounter * QUANTUM;
+		// main_tcb->priority = 0;
+		// main_tcb->state = RUNNING;
+
+        // getcontext(&main_tcb->context);
+
+		// current_thread = main_tcb;
+        
 	}
 
 	// switch back to caller
@@ -187,8 +244,6 @@ int worker_yield()
 
 	// YOUR CODE HERE
 
-	if (DEBUG) printf("in worker yield\n");
-
 	if (current_thread)
 	{
 		// set to ready add to runqueue
@@ -196,18 +251,20 @@ int worker_yield()
 		enqueue(&runqueue_head, current_thread);
 
 		// save thread's context
-		getcontext(&current_thread->context);
+		//getcontext(&current_thread->context);
 
-		// swap to scheluder
+		// swap to scheduler
 		if (DEBUG) printf("worker yield. threadId: %u yielding. switching to sched ctx\n", current_thread->threadId);
-	   	swapcontext(&current_thread->context, &scheduler_ctx);
+	   	tot_cntx_switches++;
+		swapcontext(&current_thread->context, &scheduler_ctx);
 	}
 	else
 	{
 		getcontext(&current_ctx);
 
 		if (DEBUG) printf("worker yield. current thread null. switching to sched ctx\n");
-	   	swapcontext(&current_ctx,&scheduler_ctx);
+	   	tot_cntx_switches++;
+		swapcontext(&current_ctx,&scheduler_ctx);
 	}
 
 	return 0;
@@ -226,14 +283,21 @@ void worker_exit(void *value_ptr) {
 		{
         	current_thread->exit_value = value_ptr;
 		}
+
+    	// Update avg_turn_time
+		long turnaroundTime = (timerCounter * QUANTUM) - current_thread->created_time;
+		update_turnaround_time(turnaroundTime);
+
 		if (DEBUG) printf("worker exit. thread terminated. switching to sched ctx\n");
-        setcontext(&scheduler_ctx);
+        tot_cntx_switches++;
+		setcontext(&scheduler_ctx);
 	}
 	else
 	{
 		getcontext(&current_ctx);
 		if (DEBUG) printf("worker exit. current thread null. switching to sched ctx\n");
-	   	setcontext(&scheduler_ctx);
+	   	tot_cntx_switches++;
+		setcontext(&scheduler_ctx);
 	}
 
 
@@ -310,12 +374,12 @@ int worker_mutex_lock(worker_mutex_t *mutex)
 		enqueue(&mutex->blocked_threads, current_thread);
 
 		getcontext(&current_thread->context);
-		if (DEBUG) printf("worker mutex lock. switching to sched ctx\n");
+		if (DEBUG) printf("worker mutex lock. thread%u waiting. switching to sched ctx\n", current_thread->threadId);
+		tot_cntx_switches++;
 		swapcontext(&current_thread->context, &scheduler_ctx);
 	}
 
 	// acquired mutex
-	mutex->ownerId = current_thread->threadId;
 
 	return 0;
 };
@@ -340,8 +404,6 @@ int worker_mutex_unlock(worker_mutex_t *mutex)
         nextThread->state = READY;
         enqueue(&runqueue_head, nextThread); 
     }
-
-	mutex->ownerId = NULL;
 
     return 0;
 };
@@ -385,7 +447,6 @@ int worker_mutex_destroy(worker_mutex_t *mutex)
 /* scheduler */
 static void schedule()
 {
-	if (DEBUG) printf("in schedule\n");
 	// - every time a timer interrupt occurs, your worker thread library 
 	//   should be contexted switched from a thread context to this 
 	//   schedule() function
@@ -394,31 +455,10 @@ static void schedule()
 
 	// - invoke scheduling algorithms according to the policy (PSJF or MLFQ)
 #ifndef MLFQ
-		// Choose PSJF
-		//sched_psjf();
+	sched_psjf();
 #else 
-		// Choose MLFQ
-		//sched_mlfq();
+	//sched_mlfq();
 #endif
-	
-	isInScheduler = 1;
-	if (runqueue_head == NULL)
-	{
-		if (DEBUG) printf("schedule. runqueue empty. switching back to current ctx\n");
-		isInScheduler = 0;
-		setcontext(&current_ctx);
-	}
-	else
-	{
-		struct node *currThreadNode = dequeue(&runqueue_head);
-		current_thread = currThreadNode->data;
-
-		if (DEBUG) printf("schedule. switching to thread ctx. threadId: %u\n", current_thread->threadId);
-		isInScheduler = 0;
-		setcontext(&current_thread->context);
-	}
-
-	isInScheduler = 0;
 }
 
 /* Pre-emptive Shortest Job First (POLICY_PSJF) scheduling algorithm */
@@ -428,6 +468,59 @@ static void sched_psjf()
 	// (feel free to modify arguments and return types)
 
 	// YOUR CODE HERE
+
+	if (runqueue_head == NULL)
+	{
+		if (DEBUG) printf("schedule. runqueue empty. switching back to current ctx\n");
+		tot_cntx_switches++;
+		setcontext(&current_ctx);
+	}
+
+	struct node *current = runqueue_head;
+    struct node *selected = NULL;
+    struct TCB *selected_thread = NULL;
+
+    while (current != NULL)
+	{
+        if (selected_thread == NULL || current->data->elapsed_quantums < selected_thread->elapsed_quantums)
+		{
+            selected_thread = current->data;
+            selected = current;
+        }
+        current = current->next;
+    }
+
+    if (selected_thread != NULL)
+	{
+		if (current_thread != NULL)
+		{
+			// if current thread running is selected, resume
+			if (current_thread == selected_thread)
+			{
+				setcontext(&current_ctx);
+			}
+
+			// enque the current thread back to the runqueue, set state from running to
+			if (current_thread->state != TERMINATED) {
+				current_thread->state = READY;
+				enqueue(&runqueue_head, current_thread);
+			}
+		}
+
+        // Remove the selected thread from the runqueue
+        struct node *currThreadNode = dequeue_thread(&runqueue_head, selected_thread->threadId);
+		current_thread = currThreadNode->data;
+		current_thread->state = RUNNING;
+
+		if (current_thread->first_sched_time == 0) {
+			current_thread->first_sched_time = timerCounter * QUANTUM;
+			long responseTime = current_thread->first_sched_time - current_thread->created_time;
+			update_response_time(responseTime);
+		}
+
+        tot_cntx_switches++;
+		setcontext(&current_thread->context);
+    }
 }
 
 /* Preemptive MLFQ scheduling algorithm */
@@ -532,3 +625,41 @@ struct node* dequeue(struct node **queue_head)
     *queue_head = (*queue_head)->next;
     return temp;
 }
+
+struct node* dequeue_thread(struct node **queue_head, worker_t threadId)
+{
+    if (queue_head == NULL || *queue_head == NULL) {
+        return NULL;
+    }
+
+    struct node *current = *queue_head;
+    struct node *previous = NULL;
+
+    while (current != NULL) {
+        if (current->data->threadId == threadId) {
+            if (previous == NULL) { // The thread is at the head of the queue
+                *queue_head = current->next;
+            } else {
+                previous->next = current->next;
+            }
+            return current;
+        }
+        previous = current;
+        current = current->next;
+    }
+
+    return NULL; // Thread not found
+}
+
+void update_response_time(long responseTime)
+{
+    num_responded_threads++;
+    avg_resp_time = ((avg_resp_time * (num_responded_threads - 1)) + responseTime) / num_responded_threads;
+}
+
+void update_turnaround_time(long turnaroundTime)
+{
+    num_completed_threads++;
+    avg_turn_time = ((avg_turn_time * (num_completed_threads - 1)) + turnaroundTime) / num_completed_threads;
+}
+

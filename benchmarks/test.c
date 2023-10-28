@@ -2,8 +2,17 @@
 #include <unistd.h>
 #include <pthread.h>
 #include "../thread-worker.h"
+#include <time.h>
+#include <sched.h>
 
-// test timer (DEBUG must be set to 1)
+void delay(int seconds) {
+    time_t start_time = time(NULL);
+    while (time(NULL) - start_time < seconds) {
+        sched_yield(); // Yield the processor
+    }
+}
+
+// test timer (DEBUG must be set to 1 to see print statements)
 #if 0
 
 void threadFunction0(void *arg);
@@ -26,10 +35,7 @@ int main(int argc, char **argv)
 void threadFunction0(void *arg)
 {
     printf("waiting\n");
-    while (1)
-    {
-        //printf("WAIT");
-    }
+    delay(3);
 }
 #endif
 
@@ -67,7 +73,7 @@ void* threadFunctionWithExit(void *arg)
 #endif
 
 // Test for general exiting and storing return value
-#if 1
+#if 0
 
 void* threadFunctionReturn(void *arg);
 void* threadFunctionExit(void *arg);
@@ -163,7 +169,7 @@ void threadFunction1(void *arg)
 #endif
 
 // test mutex
-#if 0
+#if 1
 
 // Define a shared resource
 int sharedResource = 0;
@@ -198,6 +204,8 @@ int main(int argc, char **argv)
 
     pthread_mutex_destroy(&mutex);
 
+    //print_app_stats();
+
     printf("exiting main\n");
 
     return 0;
@@ -215,7 +223,7 @@ int threadFunction0(void *arg)
     // Access the shared resource
     printf("Thread %u aquired mutex\n", threadNum);
     sharedResource++;
-    sleep(5); // Simulate some work
+    delay(4); // Simulate some work
 
     printf("Thread %u releasing mutex\n", threadNum);
 
@@ -231,16 +239,12 @@ int threadFunction1(void *arg)
 
     printf("Thread %lu attempt to aquire mutex.\n", threadNum);
 
-    // Try to acquire the mutex
-    // SHOULD GET STUCK HERE
-    // context does not get set right, after mutex lock, context does not return to
-    // pthread join in thread1, it returns to the line after
     pthread_mutex_lock(&mutex);
 
     // Access the shared resource
     printf("Thread %u aquired mutex\n", threadNum);
     sharedResource++;
-    sleep(1); // Simulate some work
+    delay(1); // Simulate some work
 
     printf("Thread %u releasing mutex\n", threadNum);
 

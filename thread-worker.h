@@ -1,8 +1,8 @@
 // File:	worker_t.h
 
 // List all group member's name: Trevor Dovan, Maanav
-// username of iLab: ilab3 
-// iLab Server: ilab3.cs.rutgers.edu
+// username of iLab: td441, 
+// iLab Server: rlab1.cs.rutgers.edu
 
 #ifndef WORKER_T_H
 #define WORKER_T_H
@@ -28,35 +28,26 @@ typedef uint worker_t;
 
 typedef struct TCB
 {
-	/* add important states in a thread control block */
 	// YOUR CODE HERE
+
 	worker_t 	threadId;			// thread Id
 	ucontext_t 	context;			// thread context
-	void*		stack_pointer;		// thread stack
-	int			priority;			// thread priority
+	void*		stack_pointer;		// thread context stack pointer
+	int			priority;			// thread priority level (unused)
+	int			elapsed_quantums;	// thread elapsed time in quantums
+	long		created_time;
+	long		first_sched_time;	
 	void*		exit_value;			// thread exit value
 	enum { NEW, READY, RUNNING, BLOCKED, TERMINATED } state; // thread status
 
 } tcb; 
 
-typedef struct Thread_wrapper
-{
-    void *(*function)(void*);
-    void *arg;
-	struct TCB *thread;
-
-} thread_wrapper_arg_t;
-
-
 /* mutex struct definition */
 typedef struct worker_mutex_t
 {
-	/* add something here */
 	// YOUR CODE HERE
 
-	//_Atomic {LOCKED, UNLOCKED} state;
 	int isLocked;
-	worker_t ownerId;
 	struct node *blocked_threads;
 
 } worker_mutex_t;
@@ -72,6 +63,15 @@ typedef struct node
 	struct node *next;
 
 } Node;
+
+// thread wrapper
+typedef struct Thread_wrapper
+{
+    void *(*function)(void*);
+    void *arg;
+	struct TCB *thread;
+
+} thread_wrapper_arg_t;
 
 /* Function Declarations: */
 
