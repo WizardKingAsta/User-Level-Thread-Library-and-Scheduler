@@ -32,7 +32,6 @@ typedef struct TCB
 	// YOUR CODE HERE
 	worker_t 	threadId;			// thread Id
 	ucontext_t 	context;			// thread context
-	ucontext_t 	joinContext;		// thread join context
 	void*		stack_pointer;		// thread stack
 	int			priority;			// thread priority
 	void*		exit_value;			// thread exit value
@@ -57,7 +56,7 @@ typedef struct worker_mutex_t
 
 	//_Atomic {LOCKED, UNLOCKED} state;
 	int isLocked;
-	int ownerId;
+	worker_t ownerId;
 	struct node *blocked_threads;
 
 } worker_mutex_t;

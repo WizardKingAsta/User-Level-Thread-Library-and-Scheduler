@@ -16,7 +16,7 @@ double avg_resp_time=0;
 // INITAILIZE ALL YOUR OTHER VARIABLES HERE
 // YOUR CODE HERE
 
-#define DEBUG 1
+#define DEBUG 0
 #define MAX_THREADS 128
 
 static void 		schedule();
@@ -37,7 +37,7 @@ static int 			threadCount = 0;
 struct node*		runqueue_head;
 
 // global contexts to swtich between
-static ucontext_t 	scheduler_context;
+static ucontext_t 	scheduler_ctx;
 static ucontext_t 	current_ctx;
 // ADD BENCHMARK CONTEXt
 
@@ -46,18 +46,20 @@ static void* 		sched_stack_pointer;
 static int 			accessedFirstTime = 0;
 static int 			isInScheduler = 0;
 
+static int timerCounter = 0;
 void timer_handler(int signum)
 {
-	if (DEBUG) printf("timer hit. ");
+	timerCounter++;
+	if (DEBUG) printf("timer hit %d. ", timerCounter);
+
 	if (isInScheduler)
 	{
 		if (DEBUG) printf("already in scheduler. returning\n");
 		return;
 	}
 
-	getcontext(&current_ctx);
 	if (DEBUG) printf("switching to sched ctx\n");
-	swapcontext(&current_ctx,&scheduler_context);
+	swapcontext(&current_ctx,&scheduler_ctx);
 }
 
 void setUpTimer()
@@ -89,7 +91,7 @@ void* thread_wrapper(void *arg)
 	free(wrapper_arg); // Clean up dynamically allocated memory for the argument
 
 	if (DEBUG) printf("thread wrapper. thread: %u terminated. switching to sched ctx\n", wrapper_arg->thread->threadId);
-	setcontext(&scheduler_context);
+	setcontext(&scheduler_ctx);
 
 	// dont think this ever gets hit
     return ret;
@@ -183,6 +185,9 @@ int worker_yield()
 	// - switch from thread context to scheduler context
 
 	// YOUR CODE HERE
+
+	if (DEBUG) printf("in worker yield\n");
+
 	if (current_thread)
 	{
 		// set to ready add to runqueue
@@ -194,14 +199,14 @@ int worker_yield()
 
 		// swap to scheluder
 		if (DEBUG) printf("worker yield. threadId: %u yielding. switching to sched ctx\n", current_thread->threadId);
-	   	swapcontext(&current_thread->context, &scheduler_context);
+	   	swapcontext(&current_thread->context, &scheduler_ctx);
 	}
 	else
 	{
 		getcontext(&current_ctx);
 
 		if (DEBUG) printf("worker yield. current thread null. switching to sched ctx\n");
-	   	swapcontext(&current_ctx,&scheduler_context);
+	   	swapcontext(&current_ctx,&scheduler_ctx);
 	}
 
 	return 0;
@@ -220,14 +225,14 @@ void worker_exit(void *value_ptr) {
         	current_thread->exit_value = value_ptr;
 		}
 		if (DEBUG) printf("worker exit. switching to sched ctx\n");
-        setcontext(&scheduler_context);
+        setcontext(&scheduler_ctx);
 		//free(currentThread);
 	}
 	else
 	{
 		getcontext(&current_ctx);
 		if (DEBUG) printf("worker exit. switching to sched ctx\n");
-	   	setcontext(&scheduler_context);
+	   	setcontext(&scheduler_ctx);
 	}
 
 
@@ -251,7 +256,6 @@ int worker_join(worker_t thread, void **value_ptr)
     // Spin wait for the thread to terminate
     while (target_thread->state != TERMINATED) 
 	{
-		//getcontext(&target_thread->joinContext);
         worker_yield(); // Yield the CPU to allow other threads to run
     }
 
@@ -265,7 +269,6 @@ int worker_join(worker_t thread, void **value_ptr)
     free(target_thread->stack_pointer);
     free(target_thread);
 
-	//setcontext(&target_thread->joinContext);
     return 0;
 };
 
@@ -307,8 +310,11 @@ int worker_mutex_lock(worker_mutex_t *mutex)
 
 		getcontext(&current_thread->context);
 		if (DEBUG) printf("worker mutex lock. switching to sched ctx\n");
-		swapcontext(&current_thread->context, &scheduler_context);
+		swapcontext(&current_thread->context, &scheduler_ctx);
 	}
+
+	// acquired mutex
+	mutex->ownerId = current_thread->threadId;
 
 	return 0;
 };
@@ -333,6 +339,8 @@ int worker_mutex_unlock(worker_mutex_t *mutex)
         nextThread->state = READY;
         enqueue(&runqueue_head, nextThread); 
     }
+
+	mutex->ownerId = NULL;
 
     return 0;
 };
@@ -376,17 +384,22 @@ int worker_mutex_destroy(worker_mutex_t *mutex)
 /* scheduler */
 static void schedule()
 {
+	if (DEBUG) printf("in schedule\n");
 	// - every time a timer interrupt occurs, your worker thread library 
 	//   should be contexted switched from a thread context to this 
 	//   schedule() function
-	
-	// if (sched == PSJF)
-	//		sched_psjf();
-	// else if (sched == MLFQ)
-	// 		sched_mlfq();
 
 	// YOUR CODE HERE
 
+	// - invoke scheduling algorithms according to the policy (PSJF or MLFQ)
+#ifndef MLFQ
+		// Choose PSJF
+		//sched_psjf();
+#else 
+		// Choose MLFQ
+		//sched_mlfq();
+#endif
+	
 	isInScheduler = 1;
 	if (runqueue_head == NULL)
 	{
@@ -402,16 +415,6 @@ static void schedule()
 		if (DEBUG) printf("schedule. switching to thread ctx. threadId: %u\n", current_thread->threadId);
 		isInScheduler = 0;
 		setcontext(&current_thread->context);
-
-		// - invoke scheduling algorithms according to the policy (PSJF or MLFQ)
-#ifndef MLFQ
-		// Choose PSJF
-		//sched_psjf();
-
-#else 
-		// Choose MLFQ
-		//sched_mlfq();
-#endif
 	}
 
 	isInScheduler = 0;
@@ -449,20 +452,42 @@ void print_app_stats(void) {
 
 int setUpSchedulerContext()
 {
-	if (getcontext(&scheduler_context) < 0)
+	// Initialize scheduler_ctx
+	if (getcontext(&scheduler_ctx) < 0)
 	{
 		perror("getcontext");
 		exit(1);
 	}
 
 	sched_stack_pointer = (void*)malloc(STACK_SIZE);
-	scheduler_context.uc_link = NULL;
-	scheduler_context.uc_stack.ss_sp = sched_stack_pointer;
-	scheduler_context.uc_stack.ss_size = STACK_SIZE;
-	scheduler_context.uc_stack.ss_flags = 0;
+	if (sched_stack_pointer == NULL) {
+        perror("Failed to allocate stack for scheduler_ctx");
+        exit(1);
+    }
+	scheduler_ctx.uc_link = NULL;
+	scheduler_ctx.uc_stack.ss_sp = sched_stack_pointer;
+	scheduler_ctx.uc_stack.ss_size = STACK_SIZE;
+	scheduler_ctx.uc_stack.ss_flags = 0;
 
 	getcontext(&current_ctx);
-	makecontext(&scheduler_context,(void (*)())schedule,0);
+	makecontext(&scheduler_ctx,(void (*)())schedule,0);
+
+	// // Initialize current_ctx (is this needed?)
+    // if (getcontext(&current_ctx) < 0) {
+    //     perror("getcontext for current_ctx");
+    //     exit(1);
+    // }
+
+    // void *current_ctx_stack_pointer = malloc(STACK_SIZE);
+    // if (current_ctx_stack_pointer == NULL) {
+    //     perror("Failed to allocate stack for current_ctx");
+    //     exit(1);
+    // }
+
+    // current_ctx.uc_link = NULL;
+    // current_ctx.uc_stack.ss_sp = current_ctx_stack_pointer;
+    // current_ctx.uc_stack.ss_size = STACK_SIZE;
+    // current_ctx.uc_stack.ss_flags = 0;
 }
 
 void enqueue(struct node **queue_head, struct TCB *thread)
